@@ -18,7 +18,6 @@ class CleanerEngine {
     CleanerEngine() {
         $this.ScriptStartTime = [DateTime]::Now
         $this.LogFile = "$env:TEMP\CleanTempFiles_$($this.ScriptStartTime.ToString('yyyyMMdd_HHmmss')).log"
-        $this.IsAdmin = [WindowsPrincipal]::new([WindowsIdentity]::GetCurrent()).IsInRole([WindowsBuiltInRole]::Administrator)
     }
 
     [void] WriteLog([string]$message) {
@@ -63,7 +62,7 @@ class CleanerEngine {
             Sort-Object @{Expression={$_.FullName.Length}; Descending=$true} -ErrorAction SilentlyContinue
         
         if (-not $initialItems) {
-            $this.WriteLog("[CLEANED] $name - 0 items deleted, Freed 0 MB")
+            $this.WriteLog("[CLEANED] $name - 0 files deleted, Freed 0 MB")
             return
         }
 
@@ -86,7 +85,7 @@ class CleanerEngine {
 
         $this.TotalSpaceFreed += $deletedSize
         $spaceMessage = "Freed $([math]::Round($deletedSize / 1MB, 2)) MB"
-        $this.WriteLog("[CLEANED] $name - $deletedCount/$($initialItems.Count) items deleted, $spaceMessage")
+        $this.WriteLog("[CLEANED] $name - $deletedCount/$($initialItems.Count) files deleted, $spaceMessage")
     }
 
     [void] ClearRecycleBin([string]$name) {
@@ -96,7 +95,7 @@ class CleanerEngine {
         $initialCount = $items.Count
 
         if ($initialCount -eq 0) {
-            $this.WriteLog("[CLEANED] $name - 0/0 files deleted, Freed 0 MB")
+            $this.WriteLog("[CLEANED] $name - 0 files deleted, Freed 0 MB")
             return
         }
 
@@ -151,11 +150,6 @@ class CleanerEngine {
         })
 
         foreach ($task in $tasks) {
-            if ($task.Admin -and -not $this.IsAdmin) {
-                $this.WriteLog("[SKIPPED] $($task.Name) - Requires administrator rights")
-                continue
-            }
-
             if (-not $this.ConfirmAction($task.Name, $task.Name)) {
                 $this.WriteLog("[SKIPPED] User cancelled: Deleting $($task.Name)")
                 continue
