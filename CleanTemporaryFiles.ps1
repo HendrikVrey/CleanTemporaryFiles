@@ -53,17 +53,17 @@ class CleanerEngine {
         return $false
     }
 
-    [void] ClearTempDirectory([string]$path, [string]$description) {
+    [void] ClearTempDirectory([string]$path, [string]$name) {
         if (-not (Test-Path $path)) {
-            $this.WriteLog("[SKIPPED] $description - Path not found")
-            return
+           $this.WriteLog("[SKIPPED] $name - Path not found")
+           return
         }
         
         $initialItems = Get-ChildItem $path -Recurse -Force -ErrorAction SilentlyContinue | 
             Sort-Object @{Expression={$_.FullName.Length}; Descending=$true} -ErrorAction SilentlyContinue
         
         if (-not $initialItems) {
-            $this.WriteLog("[CLEANED] $description - 0 items deleted, Freed 0 MB")
+            $this.WriteLog("[CLEANED] $name - 0 items deleted, Freed 0 MB")
             return
         }
 
@@ -86,17 +86,17 @@ class CleanerEngine {
 
         $this.TotalSpaceFreed += $deletedSize
         $spaceMessage = "Freed $([math]::Round($deletedSize / 1MB, 2)) MB"
-        $this.WriteLog("[CLEANED] $description - $deletedCount/$($initialItems.Count) items deleted, $spaceMessage")
+        $this.WriteLog("[CLEANED] $name - $deletedCount/$($initialItems.Count) items deleted, $spaceMessage")
     }
 
-    [void] ClearRecycleBin([string]$description) {
+    [void] ClearRecycleBin([string]$name) {
         $shell = New-Object -ComObject Shell.Application
         $recycleBin = $shell.Namespace(0xA)
         $items = $recycleBin.Items()
         $initialCount = $items.Count
 
         if ($initialCount -eq 0) {
-            $this.WriteLog("[CLEANED] $description - 0/0 files deleted, Freed 0 MB")
+            $this.WriteLog("[CLEANED] $name - 0/0 files deleted, Freed 0 MB")
             return
         }
 
@@ -106,7 +106,7 @@ class CleanerEngine {
         }
 
         $deletedCount = 0
-        if ($PSCmdlet.ShouldProcess($description, "Empty Recycle Bin")) {
+        if ($PSCmdlet.ShouldProcess($name, "Empty Recycle Bin")) {
             Clear-RecycleBin -Force -ErrorAction Stop
             $deletedCount = $initialCount
         }
@@ -115,14 +115,15 @@ class CleanerEngine {
         $this.TotalSpaceFreed += $spaceFreed
 
         $spaceMessage = "Freed $([math]::Round($spaceFreed / 1MB, 2)) MB"
-        $this.WriteLog("[CLEANED] $description - $deletedCount/$initialCount files deleted, $spaceMessage")
+        $this.WriteLog("[CLEANED] $name - $deletedCount/$initialCount files deleted, $spaceMessage")
     }
 
     [void] Execute() {
         Write-Host "`n=== SYSTEM CLEANUP TOOL ===" -ForegroundColor Cyan
         Write-Host "This script will clean up temporary files and folders" -ForegroundColor Yellow
         Write-Host "Targets: Temp files, Downloads folder, and Recycle Bin" -ForegroundColor Yellow
-        Write-Host "Close all applications before continuing for best results`n"
+        Write-Host "Files not deleted are in use by the Operating System`n" -ForegroundColor Yellow
+        Write-Host "Close all applications before continuing for the best results`n"
 
         $this.ProcessTasks()
         $this.GenerateReport()
@@ -138,7 +139,6 @@ class CleanerEngine {
         $tasks.Add(@{
             Name = "System Temporary Files"
             Path = "$env:SystemRoot\Temp"
-            Admin = $true
         })
 
         $tasks.Add(@{
@@ -157,7 +157,7 @@ class CleanerEngine {
             }
 
             if (-not $this.ConfirmAction($task.Name, $task.Name)) {
-                $this.WriteLog("[SKIPPED] User declined: $($task.Name)")
+                $this.WriteLog("[SKIPPED] User cancelled: Deleting $($task.Name)")
                 continue
             }
             
@@ -181,3 +181,6 @@ class CleanerEngine {
 
 $cleaner = [CleanerEngine]::new()
 $cleaner.Execute()
+
+Write-Host "Press any key to exit..." -ForegroundColor Cyan
+$null = $host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
