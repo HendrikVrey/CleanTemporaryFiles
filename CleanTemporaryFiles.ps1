@@ -54,38 +54,75 @@ class CleanerEngine {
 
     [void] ClearTempDirectory([string]$path, [string]$name) {
         if (-not (Test-Path $path)) {
-           $this.WriteLog("[SKIPPED] $name - Path not found")
-           return
-        }
-        
-        $initialItems = Get-ChildItem $path -Recurse -Force -ErrorAction SilentlyContinue | 
-            Sort-Object @{Expression={$_.FullName.Length}; Descending=$true} -ErrorAction SilentlyContinue
-        
-        if (-not $initialItems) {
-            $this.WriteLog("[CLEANED] $name - 0 files deleted, Freed 0 MB")
+            $this.WriteLog("[SKIPPED] $name - Path not found")
             return
         }
 
-        $deletedSize = 0
-        $deletedCount = 0
+        $isWindowsUpdatePath = $path -like "*SoftwareDistribution\Download*"
+        $serviceName = "wuauserv"
 
-        $initialItems | ForEach-Object {
+        if ($isWindowsUpdatePath) {
             try {
-                if ($PSCmdlet.ShouldProcess($_.FullName, "Delete")) {
-                    $itemSize = if (-not $_.PSIsContainer) { $_.Length } else { 0 }
-                    Remove-Item $_.FullName -Force -Recurse -ErrorAction Stop
-                    $deletedCount++
-                    $deletedSize += $itemSize
+                $service = Get-Service -Name $serviceName -ErrorAction Stop
+                if ($service.Status -eq "Running") {
+                    $this.WriteLog("[INFO] Stopping Windows Update service...")
+                    Stop-Service -Name $serviceName -Force -ErrorAction Stop
+                    [System.Threading.Thread]::Sleep(2000) 
+                    $this.WriteLog("[INFO] Windows Update service stopped")
                 }
             }
             catch {
-                #Intentionally to skip errors for locked files currently in use
+                $this.WriteLog("[ERROR] Failed to stop Windows Update service: $_")
+                return
             }
         }
 
-        $this.TotalSpaceFreed += $deletedSize
-        $spaceMessage = "Freed $([math]::Round($deletedSize / 1MB, 2)) MB"
-        $this.WriteLog("[CLEANED] $name - $deletedCount/$($initialItems.Count) files deleted, $spaceMessage")
+        try {
+            $initialItems = Get-ChildItem $path -Recurse -Force -ErrorAction SilentlyContinue | 
+                Sort-Object @{Expression={$_.FullName.Length}; Descending=$true} -ErrorAction SilentlyContinue
+
+            if (-not $initialItems) {
+                $this.WriteLog("[CLEANED] $name - 0 files deleted, Freed 0 MB")
+                return
+            }
+
+            $deletedSize = 0
+            $deletedCount = 0
+
+            $initialItems | ForEach-Object {
+                try {
+                    if ($PSCmdlet.ShouldProcess($_.FullName, "Delete")) {
+                        $itemSize = if (-not $_.PSIsContainer) { $_.Length } else { 0 }
+                        Remove-Item $_.FullName -Force -Recurse -ErrorAction Stop
+                        $deletedCount++
+                        $deletedSize += $itemSize
+                    }
+                }
+                catch {
+                    #Intentionally empty to skip files in use
+                }
+            }
+
+            $this.TotalSpaceFreed += $deletedSize
+            $spaceMessage = "Freed $([math]::Round($deletedSize / 1MB, 2)) MB"
+            $this.WriteLog("[CLEANED] $name - $deletedCount/$($initialItems.Count) files deleted, $spaceMessage")
+        }
+        finally {
+            if ($isWindowsUpdatePath) {
+                try {
+                    $service = Get-Service -Name $serviceName -ErrorAction Stop
+                    if ($service.Status -ne "Running") {
+                        $this.WriteLog("[INFO] Restarting Windows Update service...")
+                        Start-Service -Name $serviceName -ErrorAction Stop
+                        [System.Threading.Thread]::Sleep(2000) 
+                        $this.WriteLog("[INFO] Windows Update service started")
+                    }
+                }
+                catch {
+                    $this.WriteLog("[ERROR] Failed to restart Windows Update service: $_")
+                }
+            }
+        }
     }
 
     [void] ClearRecycleBin([string]$name) {
@@ -119,8 +156,10 @@ class CleanerEngine {
 
     [void] Execute() {
         Write-Host "`n=== SYSTEM CLEANUP TOOL ===" -ForegroundColor Cyan
-        Write-Host "This script will clean up temporary files and folders" -ForegroundColor Yellow
-        Write-Host "Targets: Temp files, Downloads folder, and Recycle Bin" -ForegroundColor Yellow
+        Write-Host "This script will deletes useless files" -ForegroundColor Yellow
+        Write-Host "These files are not needed and Windows never deletes them using up storage space" -ForegroundColor Yellow
+        Write-Host "There are also options to delete files in your Downloads folder and Recycle Bin" -ForegroundColor Yellow
+        Write-Host "Targets: Temp files, Downloads folder, Recycle Bin and Windows Update downloaded files" -ForegroundColor Yellow
         Write-Host "Files not deleted are in use by the Operating System`n" -ForegroundColor Yellow
         Write-Host "Close all applications before continuing for the best results`n"
 
@@ -134,21 +173,26 @@ class CleanerEngine {
             Name = "User Temporary Files"
             Path = $env:TEMP
         })
-
+    
         $tasks.Add(@{
             Name = "System Temporary Files"
             Path = "$env:SystemRoot\Temp"
         })
-
+    
         $tasks.Add(@{
             Name = "Downloads Folder"
             Path = [Environment]::GetFolderPath('User') + "\Downloads"
         })
-
+    
+        $tasks.Add(@{
+            Name = "Windows Update Downloads"
+            Path = "$env:SystemRoot\SoftwareDistribution\Download"
+        })
+    
         $tasks.Add(@{
             Name = "Recycle Bin"
         })
-
+    
         foreach ($task in $tasks) {
             if (-not $this.ConfirmAction($task.Name, $task.Name)) {
                 $this.WriteLog("[SKIPPED] User cancelled: Deleting $($task.Name)")
