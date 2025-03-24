@@ -36,7 +36,7 @@ class CleanerEngine {
     [bool] ConfirmAction([string]$title, [string]$message) {
         Write-Host "`n=== $title ===" -ForegroundColor Cyan
         do {
-            $response = Read-Host "Clear $message [Yes(y) / No(n) / Quit(q)]"
+            $response = Read-Host "Clear $message [Yes(y)/No(n)/Quit(q)]"
             switch ($response.ToUpper()) {
                 'Y' { return $true }
                 'N' { return $false }
@@ -156,10 +156,9 @@ class CleanerEngine {
 
     [void] Execute() {
         Write-Host "`n=== SYSTEM CLEANUP TOOL ===" -ForegroundColor Cyan
-        Write-Host "This script will deletes useless files" -ForegroundColor Yellow
-        Write-Host "These files are not needed and Windows never deletes them using up storage space" -ForegroundColor Yellow
-        Write-Host "There are also options to delete files in your Downloads folder and Recycle Bin" -ForegroundColor Yellow
-        Write-Host "Targets: Temp files, Downloads folder, Recycle Bin and Windows Update downloaded files" -ForegroundColor Yellow
+        Write-Host "This script will delete unnecessary files" -ForegroundColor Yellow
+        Write-Host "These files are not needed and Windows never deletes them, using up storage space" -ForegroundColor Yellow
+        Write-Host "There are options to delete files in your Downloads folder, Recycle Bin, and browser caches" -ForegroundColor Yellow
         Write-Host "Files not deleted are in use by the Operating System`n" -ForegroundColor Yellow
         Write-Host "Close all applications before continuing for the best results`n"
 
@@ -168,32 +167,15 @@ class CleanerEngine {
     }
 
     hidden [void] ProcessTasks() {
-        $tasks = [System.Collections.Generic.List[hashtable]]::new()
-        $tasks.Add(@{
-            Name = "User Temporary Files"
-            Path = $env:TEMP
-        })
-    
-        $tasks.Add(@{
-            Name = "System Temporary Files"
-            Path = "$env:SystemRoot\Temp"
-        })
-    
-        $tasks.Add(@{
-            Name = "Downloads Folder"
-            Path = [Environment]::GetFolderPath('User') + "\Downloads"
-        })
-    
-        $tasks.Add(@{
-            Name = "Windows Update Downloads"
-            Path = "$env:SystemRoot\SoftwareDistribution\Download"
-        })
-    
-        $tasks.Add(@{
-            Name = "Recycle Bin"
-        })
-    
-        foreach ($task in $tasks) {
+        $standardTasks = @(
+            @{Name = "User Temporary Files"; Path = $env:TEMP},
+            @{Name = "System Temporary Files"; Path = "$env:SystemRoot\Temp"},
+            @{Name = "Downloads Folder"; Path = [Environment]::GetFolderPath('User') + "\Downloads"},
+            @{Name = "Windows Update Downloads"; Path = "$env:SystemRoot\SoftwareDistribution\Download"},
+            @{Name = "Recycle Bin"}
+        )
+
+        foreach ($task in $standardTasks) {
             if (-not $this.ConfirmAction($task.Name, $task.Name)) {
                 $this.WriteLog("[SKIPPED] User cancelled: Deleting $($task.Name)")
                 continue
@@ -206,6 +188,88 @@ class CleanerEngine {
                 $this.ClearTempDirectory($task.Path, $task.Name)
             }
         }
+
+        $this.ClearBrowserCaches()
+        $this.ClearSystemCaches()
+    }
+
+    hidden [void] ClearBrowserCaches() {
+        Write-Host "`n=== BROWSER CACHE CLEARING ===" -ForegroundColor Cyan
+        Write-Host "This will clear cache files for selected browsers`n" -ForegroundColor Yellow
+
+        $browsers = @(
+            @{
+                Name = "Google Chrome"
+                Paths = @(
+                    "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\Cache",
+                    "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\Code Cache"
+                )
+            },
+            @{
+                Name = "Microsoft Edge"
+                Paths = @(
+                    "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Cache",
+                    "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Code Cache"
+                )
+            },
+            @{
+                Name = "Mozilla Firefox"
+                Paths = @(
+                    "$env:LOCALAPPDATA\Mozilla\Firefox\Profiles\*\cache2",
+                    "$env:LOCALAPPDATA\Mozilla\Firefox\Profiles\*\storage\default",
+                    "$env:LOCALAPPDATA\Mozilla\Firefox\Crash Reports"
+                )
+            }
+        )
+
+        foreach ($browser in $browsers) {
+            $choice = $this.GetUserChoice("Do you use $($browser.Name)?", "Clear $($browser.Name) cache")
+            if ($choice -eq 'y') {
+                foreach ($path in $browser.Paths) {
+                    $this.ClearTempDirectory($path, "$($browser.Name) Cache")
+                }
+            }
+        }
+    }
+
+    hidden [void] ClearSystemCaches() {
+        Write-Host "`n=== SYSTEM CACHE CLEANING ===" -ForegroundColor Cyan
+        
+        $systemTasks = @(
+            @{
+                Name = "Prefetch Files"
+                Path = "$env:SystemRoot\Prefetch"
+            },
+            @{
+                Name = "Windows Upgrade Logs"
+                Path = "$env:SystemDrive\Windows\Logs\WindowsUpdate"
+            }
+        )
+
+        foreach ($task in $systemTasks) {
+            if ($this.ConfirmAction($task.Name, $task.Name)) {
+                $this.ClearTempDirectory($task.Path, $task.Name)
+            }
+        }
+    }
+
+    hidden [string] GetUserChoice([string]$question, [string]$action) {
+        Write-Host "`n=== $action ===" -ForegroundColor Cyan
+        do {
+            $response = Read-Host "$question [Yes(y)/No(n)/Quit(q)]"
+            switch ($response.ToUpper()) {
+                'Y' { return 'y' }
+                'N' { return 'n' }
+                'Q' { 
+                    $this.WriteLog("[ABORTED] Operation canceled by user")
+                    exit 
+                }
+                default {
+                    Write-Host "Invalid input. Please choose Y (Yes), N (No), or Q (Quit)" -ForegroundColor Yellow
+                }
+            }
+        } while ($true)
+        return $null
     }
 
     hidden [void] GenerateReport() {
